@@ -1,49 +1,25 @@
-name: Full AMC 10 scrape (sharded)
+name: Merge shard artifacts
 
-# Scrapes all 50 AMC 10 administrations in parallel shards, then merges the
-# results into data/problems.json and commits. Trigger by pushing a change to
-# scripts/scrape-full-request.json, or run manually from the Actions tab.
+# Merges shard-*.json artifacts from a completed "Full AMC 10 scrape" run
+# into data/problems.json, without re-scraping. Trigger by pushing a change
+# to scripts/merge-request.json containing {"run_id": <shard run id>}.
 
 on:
   workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Shard run ID to merge artifacts from"
+        required: true
   push:
     paths:
-      - "scripts/scrape-full-request.json"
-
-concurrency:
-  group: scrape-full
-  cancel-in-progress: false
+      - "scripts/merge-request.json"
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
-  shard:
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    strategy:
-      fail-fast: false
-      matrix:
-        index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install dependencies
-        run: pip install requests beautifulsoup4 cloudscraper
-      - name: Scrape shard ${{ matrix.index }}/10
-        run: |
-          python scripts/scrape.py --mode full \
-            --shard-index ${{ matrix.index }} --shard-count 10
-      - uses: actions/upload-artifact@v4
-        with:
-          name: shard-${{ matrix.index }}
-          path: data/shards/shard-${{ matrix.index }}.json
-          if-no-files-found: error
-
   merge:
-    needs: shard
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -52,11 +28,20 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install dependencies
-        run: pip install requests beautifulsoup4
+      - name: Determine run id
+        id: rid
+        run: |
+          if [ -n "${{ inputs.run_id }}" ]; then
+            RID="${{ inputs.run_id }}"
+          else
+            RID=$(python -c "import json;print(json.load(open('scripts/merge-request.json'))['run_id'])")
+          fi
+          echo "run_id=$RID" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+          run-id: ${{ steps.rid.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Assemble shards and merge
         run: |
           mkdir -p data/shards

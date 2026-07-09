@@ -30,7 +30,12 @@ try:
 except ImportError:  # parse-fixtures mode works without requests
     requests = None
 
-from bs4 import BeautifulSoup, NavigableString, Tag
+# bs4 is only needed for scraping/parsing, not for --mode merge, so keep the
+# import soft so the merge job can run without installing it.
+try:
+    from bs4 import BeautifulSoup, NavigableString, Tag
+except ImportError:  # pragma: no cover
+    BeautifulSoup = NavigableString = Tag = None
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURE_DIR = ROOT / "scripts" / "fixtures"
