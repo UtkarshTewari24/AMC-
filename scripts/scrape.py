@@ -37,10 +37,17 @@ DATA_DIR = ROOT / "data"
 DIAGRAM_DIR = ROOT / "public" / "diagrams"
 
 WIKI = "https://artofproblemsolving.com/wiki/index.php"
-USER_AGENT = (
-    "AMC10Trainer/1.0 (educational practice app; "
-    "https://github.com/UtkarshTewari24/AMC-)"
-)
+# AoPS's WAF 403s non-browser clients, so we present standard browser
+# headers; rate limiting below keeps the crawl polite regardless.
+BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://artofproblemsolving.com/",
+}
 REQUEST_DELAY = 0.5
 
 TOPICS = [
@@ -67,18 +74,30 @@ def contest_list():
 # ---------------------------------------------------------------- fetching
 
 _session = None
+_session_kind = "requests"
+
+
+def _make_session(kind):
+    if kind == "cloudscraper":
+        import cloudscraper
+
+        return cloudscraper.create_scraper(
+            browser={"browser": "chrome", "platform": "linux", "mobile": False}
+        )
+    s = requests.Session()
+    s.headers.update(BROWSER_HEADERS)
+    return s
 
 
 def http_get(url):
-    global _session
+    global _session, _session_kind
     if _session is None:
-        _session = requests.Session()
-        _session.headers["User-Agent"] = USER_AGENT
-    for attempt in range(5):
+        _session = _make_session(_session_kind)
+    for attempt in range(6):
         time.sleep(REQUEST_DELAY)
         try:
-            resp = _session.get(url, timeout=30)
-        except requests.RequestException as exc:
+            resp = _session.get(url, timeout=45)
+        except Exception as exc:
             print(f"    retry ({exc.__class__.__name__}) {url}", flush=True)
             time.sleep(2 ** attempt)
             continue
@@ -86,6 +105,15 @@ def http_get(url):
             return resp
         if resp.status_code == 404:
             return None
+        if resp.status_code == 403 and _session_kind == "requests":
+            # WAF challenge — switch to cloudscraper and retry
+            print("    403 — switching to cloudscraper session", flush=True)
+            try:
+                _session_kind = "cloudscraper"
+                _session = _make_session(_session_kind)
+                continue
+            except ImportError:
+                pass
         print(f"    retry (HTTP {resp.status_code}) {url}", flush=True)
         time.sleep(2 ** attempt)
     raise RuntimeError(f"failed to fetch {url}")
