@@ -18,6 +18,7 @@ retries with backoff on 429/5xx.
 
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -79,10 +80,14 @@ _direct_blocked = False
 # The Wayback Machine's "id_" modifier serves the archived page byte-for-byte
 # as originally captured (no toolbar or URL rewriting), so parsing is
 # identical to a live fetch. Used when AoPS blocks the runner's IP.
-# We resolve the real nearest-snapshot timestamp via the availability API
-# rather than guessing a year, since capture dates vary widely per page.
-WAYBACK_AVAILABLE = "https://archive.org/wayback/available"
+#
+# Everything here targets web.archive.org, which is reachable from CI even
+# when AoPS and archive.org's availability endpoint are not. The CDX index
+# (web.archive.org/cdx) enumerates every capture of a URL; we take the newest
+# successful (status 200) one and fetch that exact snapshot raw.
+CDX_API = "https://web.archive.org/cdx/search/cdx"
 _wayback_ts_cache = {}
+DEBUG = os.environ.get("SCRAPE_DEBUG") == "1"
 
 
 def _get_session():
@@ -108,30 +113,54 @@ def _direct_get(url, attempts=2):
             return resp
         if resp.status_code == 404:
             return None
-        if resp.status_code == 403:
+        if resp.status_code in (403, 429, 503):
             return "blocked"
         time.sleep(2 ** attempt)
     return "blocked"
 
 
 def _wayback_timestamp(url):
-    """Nearest archived snapshot timestamp for url, or None if never archived."""
+    """Newest 200-status capture timestamp for url via the CDX index.
+
+    Returns a timestamp string, or None if the URL was never archived.
+    """
     if url in _wayback_ts_cache:
         return _wayback_ts_cache[url]
     s = _get_session()
+    params = {
+        "url": url,
+        "output": "json",
+        "fl": "timestamp,statuscode",
+        "filter": "statuscode:200",
+        "collapse": "digest",
+        "limit": "-5",  # the 5 most recent captures (newest last)
+    }
     ts = None
-    for attempt in range(4):
+    for attempt in range(5):
         time.sleep(REQUEST_DELAY)
         try:
-            resp = s.get(WAYBACK_AVAILABLE, params={"url": url}, timeout=45)
-            if resp.status_code == 200:
-                snap = (resp.json().get("archived_snapshots") or {}).get("closest")
-                if snap and snap.get("available"):
-                    ts = snap.get("timestamp")
-                break
+            resp = s.get(CDX_API, params=params, timeout=60)
         except Exception as exc:
-            print(f"    availability retry ({exc.__class__.__name__}) {url}",
-                  flush=True)
+            if DEBUG:
+                print(f"    cdx retry ({exc.__class__.__name__}) {url}",
+                      flush=True)
+            time.sleep(3 * (attempt + 1))
+            continue
+        if resp.status_code == 200:
+            rows = []
+            try:
+                rows = resp.json()
+            except Exception:
+                rows = []
+            # first row is the column header; remaining rows are captures
+            data = [r for r in rows[1:] if r]
+            if data:
+                ts = data[-1][0]  # newest
+            if DEBUG:
+                print(f"    cdx {url} -> {ts} ({len(data)} captures)", flush=True)
+            break
+        if DEBUG:
+            print(f"    cdx HTTP {resp.status_code} {url}", flush=True)
         time.sleep(3 * (attempt + 1))
     _wayback_ts_cache[url] = ts
     return ts
@@ -156,15 +185,29 @@ def _fetch_wayback_snapshot(ts, url):
         # 429/5xx: back off — archive.org throttles sustained load
         print(f"    wayback retry (HTTP {resp.status_code}) {url}", flush=True)
         time.sleep(5 * (attempt + 1))
-    raise RuntimeError(f"failed to fetch {url} via wayback")
+    return None
+
+
+# Descending years to try as a fallback when the CDX index is unreachable;
+# the id_ raw modifier redirects to the nearest capture for that year.
+_FALLBACK_YEARS = ["2024", "2022", "2020", "2023", "2019", "2018", "2016"]
 
 
 def _wayback_get(url):
     """Fetch the nearest archived copy of url; None when never archived."""
     ts = _wayback_timestamp(url)
-    if ts is None:
-        return None
-    return _fetch_wayback_snapshot(ts, url)
+    if ts is not None:
+        resp = _fetch_wayback_snapshot(ts, url)
+        if resp is not None:
+            return resp
+    # CDX unreachable or snapshot fetch failed — try fixed years directly
+    for year in _FALLBACK_YEARS:
+        resp = _fetch_wayback_snapshot(year, url)
+        if resp is not None:
+            if DEBUG:
+                print(f"    fallback year {year} hit for {url}", flush=True)
+            return resp
+    return None
 
 
 def http_get(url):

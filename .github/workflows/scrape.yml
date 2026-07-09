@@ -50,6 +50,8 @@ jobs:
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
 
       - name: Run scraper
+        env:
+          SCRAPE_DEBUG: "1"
         run: python scripts/scrape.py --mode "${{ steps.mode.outputs.mode }}"
 
       - name: Commit results
