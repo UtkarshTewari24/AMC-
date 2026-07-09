@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-navy-950 text-ink antialiased;
+  background-image: radial-gradient(
+      ellipse 80% 50% at 50% -20%,
+      rgba(99, 102, 241, 0.12),
+      transparent
+    );
+}
+
+.problem-card {
+  @apply bg-navy-900 bg-graph-paper bg-grid border border-navy-700 rounded-xl;
+}
+
+.katex {
+  font-size: 1.05em;
+}
+
+.katex-display {
+  margin: 0.75rem 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
+}
+
+::selection {
+  background: rgba(99, 102, 241, 0.4);
+}
+
+@keyframes coach-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+.coach-typing span {
+  animation: coach-pulse 1.2s infinite;
+}
+.coach-typing span:nth-child(2) { animation-delay: 0.2s; }
+.coach-typing span:nth-child(3) { animation-delay: 0.4s; }

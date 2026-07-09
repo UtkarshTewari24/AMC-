@@ -1,0 +1,18 @@
+[
+ {
+  "id": "00000000-0000-4000-8000-000000000001",
+  "year": 2015,
+  "contest": "AMC10A",
+  "number": 1,
+  "topic": "Algebra",
+  "topic_confidence": "high",
+  "difficulty": "easy",
+  "question": "What is the value of $(2^0-1+5^2-0)^{-1}\\times5?$",
+  "choices": ["-125", "-120", "\\frac{1}{5}", "\\frac{5}{24}", "25"],
+  "answer": 3,
+  "solution": "The expression inside the parentheses is $1-1+25-0=25$, so the answer is $25^{-1}\\times 5=\\frac{5}{25}=\\frac{1}{5}$. Placeholder sample — replaced by the scraped dataset.",
+  "has_diagram": false,
+  "diagram_url": null,
+  "aops_url": "https://artofproblemsolving.com/wiki/index.php/2015_AMC_10A_Problems/Problem_1"
+ }
+]
