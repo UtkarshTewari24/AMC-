@@ -193,11 +193,27 @@ def node_text(node, diagrams):
     return out
 
 
+def _is_heading_tag(tag):
+    if tag.name in ("h1", "h2", "h3"):
+        return True
+    # newer MediaWiki wraps headings: <div class="mw-heading mw-heading2"><h2>…
+    return tag.name == "div" and any(
+        "mw-heading" in c for c in (tag.get("class") or []))
+
+
+def heading_node(span):
+    """The sibling-level node for a headline span (h2, or its wrapper div)."""
+    h = span.find_parent(["h1", "h2", "h3"])
+    if h is not None and isinstance(h.parent, Tag) and _is_heading_tag(h.parent):
+        return h.parent
+    return h
+
+
 def section_content(heading):
-    """All sibling nodes after an h2/h3 heading until the next heading."""
+    """All sibling nodes after a heading until the next heading."""
     nodes = []
     for sib in heading.next_siblings:
-        if isinstance(sib, Tag) and sib.name in ("h1", "h2", "h3"):
+        if isinstance(sib, Tag) and _is_heading_tag(sib):
             break
         nodes.append(sib)
     return nodes
@@ -365,7 +381,7 @@ def find_problem_headings(soup):
     for span in soup.select("span.mw-headline"):
         m = re.fullmatch(r"Problem\s+(\d+)", span.get_text(strip=True))
         if m:
-            headings[int(m.group(1))] = span.find_parent(["h1", "h2", "h3"])
+            headings[int(m.group(1))] = heading_node(span)
     return headings
 
 
@@ -388,7 +404,7 @@ def parse_solution_page(html):
         title = span.get_text(strip=True)
         if re.match(r"^Solution", title, re.IGNORECASE) and \
                 not re.search(r"video|animated", title, re.IGNORECASE):
-            heading = span.find_parent(["h1", "h2", "h3"])
+            heading = heading_node(span)
             diagrams = []
             text = clean_text(
                 "".join(node_text(n, diagrams) for n in section_content(heading)))
@@ -459,8 +475,7 @@ def scrape_contest(year, contest, slug, fixtures_only=False,
             if not question or not choices:
                 for span in psoup.select("span.mw-headline"):
                     if span.get_text(strip=True).lower().startswith("problem"):
-                        q2, c2, d2 = parse_problem_section(
-                            span.find_parent(["h1", "h2", "h3"]))
+                        q2, c2, d2 = parse_problem_section(heading_node(span))
                         if q2 and (not question or (c2 and not choices)):
                             question, choices = q2, c2
                             diagrams = diagrams or d2
