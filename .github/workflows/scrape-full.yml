@@ -1,0 +1,80 @@
+name: Full AMC 10 scrape (sharded)
+
+# Scrapes all 50 AMC 10 administrations in parallel shards, then merges the
+# results into data/problems.json and commits. Trigger by pushing a change to
+# scripts/scrape-full-request.json, or run manually from the Actions tab.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/scrape-full-request.json"
+
+concurrency:
+  group: scrape-full
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  shard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4 cloudscraper
+      - name: Scrape shard ${{ matrix.index }}/10
+        run: |
+          python scripts/scrape.py --mode full \
+            --shard-index ${{ matrix.index }} --shard-count 10
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shard-${{ matrix.index }}
+          path: data/shards/shard-${{ matrix.index }}.json
+          if-no-files-found: error
+
+  merge:
+    needs: shard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Assemble shards and merge
+        run: |
+          mkdir -p data/shards
+          find artifacts -name 'shard-*.json' -exec cp {} data/shards/ \;
+          ls -la data/shards/
+          python scripts/scrape.py --mode merge
+      - name: Commit dataset
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -rf data/shards
+          mkdir -p data
+          git add -A data
+          if git diff --cached --quiet; then
+            echo "nothing to commit"
+            exit 0
+          fi
+          git commit -m "scrape: full AMC 10 dataset (2000-2024, A/B/Fall)"
+          for i in 1 2 3; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" && \
+            git push origin "HEAD:${GITHUB_REF_NAME}" && break
+            sleep 5
+          done

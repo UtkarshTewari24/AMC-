@@ -574,8 +574,8 @@ def scrape_contest(year, contest, slug, fixtures_only=False,
         if diagrams:
             src = normalize_img_url(diagrams[0])
             fname = f"{slug}_P{number}.png"
-            diagram_url = f"/diagrams/{fname}"
             if download_diagrams and not fixtures_only:
+                diagram_url = f"/diagrams/{fname}"
                 try:
                     resp = http_get(src)
                     if resp is not None:
@@ -586,6 +586,8 @@ def scrape_contest(year, contest, slug, fixtures_only=False,
                 except Exception as exc:
                     issues.append(f"{slug} #{number}: diagram fetch failed {exc}")
                     diagram_url = src
+            else:
+                diagram_url = src  # remote URL (sharded / fixtures mode)
 
         topic, topic_confidence = classify_topic(
             question + " " + " ".join(choices))
@@ -645,22 +647,10 @@ def mode_fixtures():
     print("fixtures saved to scripts/fixtures/", flush=True)
 
 
-def run_scrape(contests, out_path, fixtures_only=False):
-    all_problems, all_issues = [], []
-    for year, contest, slug in contests:
-        problems, issues = scrape_contest(year, contest, slug,
-                                          fixtures_only=fixtures_only)
-        all_problems.extend(problems)
-        all_issues.extend(issues)
-        print(f"   {len(problems)} problems, {len(issues)} issues total so far "
-              f"({len(all_problems)} scraped)", flush=True)
-
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(all_problems, indent=1), encoding="utf-8")
-
-    report = {
+def build_report(all_problems, all_issues, contests_n):
+    return {
         "total_problems": len(all_problems),
-        "contests": len(contests),
+        "contests": contests_n,
         "with_choices": sum(1 for p in all_problems if len(p["choices"]) == 5),
         "with_answer": sum(1 for p in all_problems if p["answer"] is not None),
         "with_solution": sum(1 for p in all_problems if p["solution"]),
@@ -669,21 +659,80 @@ def run_scrape(contests, out_path, fixtures_only=False):
             1 for p in all_problems if p["topic_confidence"] == "low"),
         "issues": all_issues,
     }
-    (DATA_DIR / "scrape-report.json").write_text(
-        json.dumps(report, indent=1), encoding="utf-8")
+
+
+def run_scrape(contests, out_path, fixtures_only=False, write_report=True,
+               download_diagrams=True):
+    all_problems, all_issues = [], []
+    for year, contest, slug in contests:
+        problems, issues = scrape_contest(year, contest, slug,
+                                          fixtures_only=fixtures_only,
+                                          download_diagrams=download_diagrams)
+        all_problems.extend(problems)
+        all_issues.extend(issues)
+        print(f"   {len(problems)} problems, {len(issues)} issues total so far "
+              f"({len(all_problems)} scraped)", flush=True)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(all_problems, indent=1), encoding="utf-8")
+
+    report = build_report(all_problems, all_issues, len(contests))
+    if write_report:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        (DATA_DIR / "scrape-report.json").write_text(
+            json.dumps(report, indent=1), encoding="utf-8")
     print(json.dumps({k: v for k, v in report.items() if k != "issues"},
                      indent=1), flush=True)
-    print(f"{len(all_issues)} issues -> data/scrape-report.json", flush=True)
+    print(f"{len(all_issues)} issues; wrote {out_path}", flush=True)
+
+
+SHARD_DIR = DATA_DIR / "shards"
+
+
+def mode_merge():
+    """Combine all per-shard JSON files into data/problems.json + report."""
+    all_problems = []
+    seen = set()
+    files = sorted(SHARD_DIR.glob("shard-*.json")) if SHARD_DIR.exists() else []
+    if not files:
+        print("no shard files found in data/shards/", flush=True)
+        return
+    for f in files:
+        part = json.loads(f.read_text(encoding="utf-8"))
+        for p in part:
+            if p["id"] in seen:
+                continue
+            seen.add(p["id"])
+            all_problems.append(p)
+        print(f"  merged {f.name}: +{len(part)} ({len(all_problems)} total)",
+              flush=True)
+
+    all_problems.sort(key=lambda p: (p["year"], p["contest"], p["number"]))
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    (DATA_DIR / "problems.json").write_text(
+        json.dumps(all_problems, indent=1), encoding="utf-8")
+    report = build_report(all_problems, [], len(files))
+    report.pop("issues", None)
+    (DATA_DIR / "scrape-report.json").write_text(
+        json.dumps(report, indent=1), encoding="utf-8")
+    print(json.dumps(report, indent=1), flush=True)
+    print(f"merged {len(all_problems)} problems -> data/problems.json",
+          flush=True)
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", choices=["fixtures", "parse-fixtures", "test",
-                                       "full"], required=True)
+                                       "full", "merge"], required=True)
+    # sharding for parallel CI jobs: this job scrapes contests[index::count]
+    ap.add_argument("--shard-index", type=int, default=0)
+    ap.add_argument("--shard-count", type=int, default=1)
     args = ap.parse_args()
 
     if args.mode == "fixtures":
         mode_fixtures()
+    elif args.mode == "merge":
+        mode_merge()
     elif args.mode == "parse-fixtures":
         contests = [(2015, "AMC10A", "2015_AMC_10A"),
                     (2000, "AMC10", "2000_AMC_10"),
@@ -695,8 +744,18 @@ def main():
     elif args.mode == "test":
         run_scrape([(2015, "AMC10A", "2015_AMC_10A")],
                    DATA_DIR / "problems.sample.json")
-    else:
-        run_scrape(contest_list(), DATA_DIR / "problems.json")
+    else:  # full
+        contests = contest_list()
+        if args.shard_count > 1:
+            contests = contests[args.shard_index::args.shard_count]
+            out = SHARD_DIR / f"shard-{args.shard_index}.json"
+            print(f"shard {args.shard_index}/{args.shard_count}: "
+                  f"{len(contests)} contests", flush=True)
+            # keep diagram URLs remote in sharded mode so artifacts stay JSON
+            run_scrape(contests, out, write_report=False,
+                       download_diagrams=False)
+        else:
+            run_scrape(contests, DATA_DIR / "problems.json")
 
 
 if __name__ == "__main__":
