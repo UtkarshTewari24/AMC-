@@ -1,10 +1,12 @@
 # AMC 10 Trainer
 
-A web app for high school students grinding for the AMC 10. Every AMC 10
-problem from 2000–2024 (both A and B contests, including the 2000/2001 single
-AMC 10 and the 2021 Fall administration), scraped from the AoPS wiki, with
-topic drills, random drills, full timed practice tests, adaptive difficulty,
-and an AI coach.
+A web app for high school students grinding for the AMC 10. **1,248 real
+problems across all 50 AMC 10 administrations** from 2000–2024 (both A and B
+contests, the 2000/2001 single AMC 10, and the 2021 Fall A/B), scraped from
+the AoPS wiki with choices, answers, and full solutions — plus topic drills,
+random drills, full timed practice tests, adaptive difficulty, and an AI
+coach. The committed dataset (`data/problems.json`) has answers for every
+problem and solutions for all but one.
 
 ## Quick start
 
@@ -69,20 +71,34 @@ Topics are auto-tagged with a keyword heuristic (low-confidence tags are
 flagged in `topic_confidence` for later review); difficulty maps from
 problem number (1–8 easy, 9–17 medium, 18–25 hard).
 
-It runs in CI because AoPS requires normal internet egress:
+It runs in CI because AoPS's WAF blocks datacenter/CI IP ranges. When a
+direct fetch is refused the scraper transparently falls back to the
+**Wayback Machine** (resolving each page's newest capture via the CDX index
+and fetching the raw `id_` snapshot), so it works from any runner.
 
-- **GitHub Actions** (recommended): the "Scrape AMC 10 problems" workflow
-  (`.github/workflows/scrape.yml`) — run it manually from the Actions tab
-  with mode `full`, or push a change to `scripts/scrape-request.json`. The
-  workflow commits `data/problems.json`, `data/scrape-report.json`, and
-  diagrams back to the branch.
-- **Locally**: `pip install requests beautifulsoup4 cloudscraper && python
-  scripts/scrape.py --mode full` (~35–50 minutes with the polite 500 ms
-  delay between requests).
+**Full dataset (recommended):** the sharded workflow
+(`.github/workflows/scrape-full.yml`) splits all 50 contests across 10
+parallel jobs, uploads each shard as an artifact, then merges them into
+`data/problems.json`. Trigger it from the Actions tab, or push a change to
+`scripts/scrape-full-request.json`. End-to-end wall-clock is ~30 minutes.
 
-Modes: `fixtures` (save raw HTML for parser development), `parse-fixtures`
-(offline parse of the fixtures), `test` (one contest end-to-end), `full`
-(all 50 contests, ~1250 problems).
+- If a shard run's merge step fails but the shards succeeded, re-merge the
+  existing artifacts without re-scraping via
+  `.github/workflows/merge-artifacts.yml` (push a `scripts/merge-request.json`
+  with `{"run_id": <shard run id>}`).
+- The single-job `scrape.yml` handles quick `fixtures`/`test` runs and
+  commits `data/problems.sample.json`.
+
+**Locally** (only where AoPS or archive.org is reachable):
+`pip install requests beautifulsoup4 cloudscraper && python
+scripts/scrape.py --mode full` (~45 minutes with the polite 500 ms delay).
+
+Modes: `fixtures` (cache raw HTML), `parse-fixtures` (offline parse), `test`
+(one contest), `full` (all 50 contests; add `--shard-index I --shard-count
+N` for one shard), `merge` (combine `data/shards/*.json`).
+
+Optional: `scripts/tag-topics-claude.mjs` re-tags topics with the Claude API
+(the keyword tagger flags ~half the problems as low-confidence).
 
 ## Stack
 
