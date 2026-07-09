@@ -1,0 +1,56 @@
+name: Scrape AMC 10 problems
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Scrape mode"
+        type: choice
+        required: true
+        default: full
+        options:
+          - fixtures
+          - test
+          - full
+
+concurrency:
+  group: scrape
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4
+
+      - name: Run scraper (${{ inputs.mode }})
+        run: python scripts/scrape.py --mode "${{ inputs.mode }}"
+
+      - name: Commit results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A scripts/fixtures data public/diagrams 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "nothing to commit"
+            exit 0
+          fi
+          git commit -m "scrape: ${{ inputs.mode }} run results"
+          for i in 1 2 3; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" && \
+            git push origin "HEAD:${GITHUB_REF_NAME}" && break
+            sleep 5
+          done
