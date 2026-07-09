@@ -19,15 +19,35 @@ That's it — the app serves problems straight from `data/problems.json`
 (committed to the repo), so it works with zero configuration. Progress is
 saved in the browser (guest mode).
 
-### Optional: AI coach
+### AI features (v2): bring your own key
 
-Set `ANTHROPIC_API_KEY` in `.env.local` to enable the AI coach (Socratic
-hints on wrong answers, insights on correct ones, free-form chat). Without a
-key the coach panel shows a setup notice and everything else keeps working.
+Open **Settings** in the app and paste your Anthropic API key (from
+[console.anthropic.com](https://console.anthropic.com/settings/keys)) — it's
+stored only in your browser and sent to the app's own API routes to call
+Claude on your behalf (never persisted server-side; no content logged). Pick
+a model (Sonnet 4.6 / Opus 4.8 / Haiku 4.5). That unlocks:
+
+- **AI coach** — Socratic hints while you drill
+- **Generate** (`/generate`) — brand-new AMC-style problems with answers &
+  solutions you can solve inline
+- **Tutor** (`/tutor`) — a structured teaching guide for any topic (concepts,
+  techniques, worked example, pitfalls)
+- **Study plan** (`/plan`) — a week-by-week plan generated from your own
+  practice stats and goals, with one-click drill links
+
+Alternatively, set a server-side `ANTHROPIC_API_KEY` in `.env.local` as a
+fallback for all users. Without any key, everything else — the full problem
+bank, drills, and timed tests — works fully offline.
 
 ```
-ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_API_KEY=sk-ant-...   # optional server-side fallback
 ```
+
+### Versions
+
+`v1` is the offline-complete release (bank + drills + timed test + coach).
+`v2` adds the bring-your-own-key AI features above. To roll back to v1:
+`git reset --hard b2e318c` (also tagged `v1` locally).
 
 ### Optional: accounts + progress sync (Supabase)
 

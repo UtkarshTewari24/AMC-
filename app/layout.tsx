@@ -11,10 +11,12 @@ export const metadata: Metadata = {
 
 const navLinks = [
   { href: "/", label: "Dashboard" },
-  { href: "/drill", label: "Topic Drill" },
-  { href: "/drill/random", label: "Random Drill" },
-  { href: "/test", label: "Practice Test" },
-  { href: "/auth", label: "Account" },
+  { href: "/drill", label: "Drill" },
+  { href: "/test", label: "Test" },
+  { href: "/generate", label: "Generate" },
+  { href: "/tutor", label: "Tutor" },
+  { href: "/plan", label: "Plan" },
+  { href: "/settings", label: "Settings" },
 ];
 
 export default function RootLayout({

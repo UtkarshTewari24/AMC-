@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextRequest, NextResponse } from "next/server";
 import { getProblem } from "@/lib/data";
+import { aiFromRequest } from "@/lib/ai";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -76,16 +77,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "unknown problem" }, { status: 404 });
   }
 
-  if (!process.env.ANTHROPIC_API_KEY) {
+  const hasKey =
+    Boolean(req.headers.get("x-anthropic-key")?.trim()) ||
+    Boolean(process.env.ANTHROPIC_API_KEY);
+  if (!hasKey) {
     return NextResponse.json({
       reply:
-        "The AI coach isn't configured yet — set ANTHROPIC_API_KEY on the server to enable it. " +
+        "The AI coach isn't configured yet — add your Anthropic API key in Settings to enable it. " +
         "In the meantime, the full solution is available below each problem after you answer.",
       configured: false,
     });
   }
 
-  const client = new Anthropic();
+  const { client, model } = aiFromRequest(req);
 
   const history = (body.messages ?? [])
     .slice(-12) // bound context
@@ -115,7 +119,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const response = await client.messages.create({
-      model: "claude-sonnet-4-6",
+      model,
       max_tokens: 1024,
       system: systemPrompt(),
       messages,
@@ -129,7 +133,7 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     if (error instanceof Anthropic.AuthenticationError) {
       return NextResponse.json({
-        reply: "The coach's API key looks invalid — check ANTHROPIC_API_KEY.",
+        reply: "That API key was rejected — check it in Settings.",
         configured: false,
       });
     }

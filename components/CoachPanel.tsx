@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Lightbulb, Send, Sparkles } from "lucide-react";
 import Latex from "./Latex";
 import { Button, cn } from "./ui";
+import { aiHeaders } from "@/lib/settings";
 import type { Problem } from "@/lib/types";
 
 interface ChatMessage {
@@ -58,7 +59,7 @@ export default function CoachPanel({
     try {
       const res = await fetch("/api/coach", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: aiHeaders(),
         body: JSON.stringify({
           problemId: problem.id,
           userAnswer,
