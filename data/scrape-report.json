@@ -1,10 +1,9 @@
 {
- "total_problems": 25,
- "contests": 1,
- "with_choices": 25,
- "with_answer": 25,
- "with_solution": 25,
- "with_diagram": 2,
- "low_confidence_topics": 14,
- "issues": []
+ "total_problems": 1250,
+ "contests": 10,
+ "with_choices": 1248,
+ "with_answer": 1250,
+ "with_solution": 1249,
+ "with_diagram": 164,
+ "low_confidence_topics": 697
 }
