@@ -353,13 +353,14 @@ def split_choices(text):
         pieces.append(text[mark_end:stop])
 
     def clean_choice(s):
-        s = s.strip()
-        s = re.sub(r"^[\\]?[ ~]+", "", s)
-        s = re.sub(r"\\q?quad\s*$", "", s.strip())
-        s = re.sub(r"^\\ ", "", s)
-        s = s.strip()
-        s = s.strip("$").strip()
-        s = re.sub(r"\\q?quad\s*$", "", s).strip()
+        # choices render as math, so drop math delimiters and the inter-choice
+        # spacing macros (\qquad / \quad / \ ) wherever they appear
+        s = s.replace("$", " ")
+        s = re.sub(r"\\q?quad", " ", s)
+        s = re.sub(r"\\[,;:!]", " ", s)      # thin/med spacing macros
+        s = re.sub(r"\\ ", " ", s)           # backslash-space
+        s = re.sub(r"^[\s~]+", "", s)
+        s = re.sub(r"\s+", " ", s).strip()
         return s
 
     choices = [clean_choice(p) for p in pieces]
