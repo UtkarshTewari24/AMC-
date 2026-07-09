@@ -12,6 +12,9 @@ on:
           - fixtures
           - test
           - full
+  push:
+    paths:
+      - "scripts/scrape-request.json"
 
 concurrency:
   group: scrape
@@ -36,8 +39,18 @@ jobs:
       - name: Install dependencies
         run: pip install requests beautifulsoup4
 
-      - name: Run scraper (${{ inputs.mode }})
-        run: python scripts/scrape.py --mode "${{ inputs.mode }}"
+      - name: Determine mode
+        id: mode
+        run: |
+          if [ -n "${{ inputs.mode }}" ]; then
+            MODE="${{ inputs.mode }}"
+          else
+            MODE=$(python -c "import json;print(json.load(open('scripts/scrape-request.json'))['mode'])")
+          fi
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+
+      - name: Run scraper
+        run: python scripts/scrape.py --mode "${{ steps.mode.outputs.mode }}"
 
       - name: Commit results
         run: |
