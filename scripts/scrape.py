@@ -74,29 +74,29 @@ def contest_list():
 # ---------------------------------------------------------------- fetching
 
 _session = None
-_session_kind = "requests"
+_direct_blocked = False
+
+# The Wayback Machine's "id_" modifier serves the archived page byte-for-byte
+# as originally captured (no toolbar or URL rewriting), so parsing is
+# identical to a live fetch. Used when AoPS blocks the runner's IP.
+WAYBACK_PREFIX = "https://web.archive.org/web/2026id_/"
 
 
-def _make_session(kind):
-    if kind == "cloudscraper":
-        import cloudscraper
-
-        return cloudscraper.create_scraper(
-            browser={"browser": "chrome", "platform": "linux", "mobile": False}
-        )
-    s = requests.Session()
-    s.headers.update(BROWSER_HEADERS)
-    return s
-
-
-def http_get(url):
-    global _session, _session_kind
+def _get_session():
+    global _session
     if _session is None:
-        _session = _make_session(_session_kind)
-    for attempt in range(6):
+        _session = requests.Session()
+        _session.headers.update(BROWSER_HEADERS)
+    return _session
+
+
+def _direct_get(url, attempts=2):
+    """Returns a Response, None for 404, or 'blocked' on persistent 403."""
+    s = _get_session()
+    for attempt in range(attempts):
         time.sleep(REQUEST_DELAY)
         try:
-            resp = _session.get(url, timeout=45)
+            resp = s.get(url, timeout=45)
         except Exception as exc:
             print(f"    retry ({exc.__class__.__name__}) {url}", flush=True)
             time.sleep(2 ** attempt)
@@ -105,18 +105,45 @@ def http_get(url):
             return resp
         if resp.status_code == 404:
             return None
-        if resp.status_code == 403 and _session_kind == "requests":
-            # WAF challenge — switch to cloudscraper and retry
-            print("    403 — switching to cloudscraper session", flush=True)
-            try:
-                _session_kind = "cloudscraper"
-                _session = _make_session(_session_kind)
-                continue
-            except ImportError:
-                pass
-        print(f"    retry (HTTP {resp.status_code}) {url}", flush=True)
+        if resp.status_code == 403:
+            return "blocked"
         time.sleep(2 ** attempt)
-    raise RuntimeError(f"failed to fetch {url}")
+    return "blocked"
+
+
+def _wayback_get(url):
+    """Fetch the latest archived copy of url; None when never archived."""
+    s = _get_session()
+    wb_url = WAYBACK_PREFIX + url
+    for attempt in range(6):
+        time.sleep(REQUEST_DELAY)
+        try:
+            resp = s.get(wb_url, timeout=90, allow_redirects=True)
+        except Exception as exc:
+            print(f"    wayback retry ({exc.__class__.__name__}) {url}",
+                  flush=True)
+            time.sleep(2 ** attempt)
+            continue
+        if resp.status_code == 200:
+            return resp
+        if resp.status_code == 404:
+            return None
+        # 429/5xx: back off — archive.org throttles sustained load
+        print(f"    wayback retry (HTTP {resp.status_code}) {url}", flush=True)
+        time.sleep(5 * (attempt + 1))
+    raise RuntimeError(f"failed to fetch {url} via wayback")
+
+
+def http_get(url):
+    global _direct_blocked
+    if not _direct_blocked:
+        resp = _direct_get(url)
+        if resp != "blocked":
+            return resp
+        _direct_blocked = True
+        print("  !! direct AoPS access blocked from this network — "
+              "falling back to the Wayback Machine", flush=True)
+    return _wayback_get(url)
 
 
 def get_page(slug_page, fixtures_only=False):
@@ -372,6 +399,20 @@ def parse_solution_page(html):
     return best
 
 
+def answer_from_solution(solution):
+    """Fallback: pull the answer letter out of the solution's \\boxed{...}."""
+    if not solution:
+        return None
+    for m in re.finditer(r"\\boxed\s*\{", solution):
+        window = solution[m.end():m.end() + 80]
+        letter = re.search(r"\(\s*([A-E])\s*\)", window)
+        if letter:
+            return letter.group(1)
+    m = re.search(r"answer is\s*\$?\\?(?:textbf|mathrm|text)?\s*\{?\s*\(\s*([A-E])\s*\)",
+                  solution)
+    return m.group(1) if m else None
+
+
 def problem_id(slug, number):
     return str(uuid.uuid5(uuid.NAMESPACE_URL,
                           f"{WIKI}/{slug}_Problems/Problem_{number}"))
@@ -435,6 +476,8 @@ def scrape_contest(year, contest, slug, fixtures_only=False,
             issues.append(f"{slug} #{number}: no solution")
 
         answer_letter = answers[number - 1] if answers else None
+        if answer_letter is None:
+            answer_letter = answer_from_solution(solution)
 
         diagram_url = None
         if diagrams:
