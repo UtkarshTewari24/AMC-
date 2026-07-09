@@ -79,7 +79,10 @@ _direct_blocked = False
 # The Wayback Machine's "id_" modifier serves the archived page byte-for-byte
 # as originally captured (no toolbar or URL rewriting), so parsing is
 # identical to a live fetch. Used when AoPS blocks the runner's IP.
-WAYBACK_PREFIX = "https://web.archive.org/web/2026id_/"
+# We resolve the real nearest-snapshot timestamp via the availability API
+# rather than guessing a year, since capture dates vary widely per page.
+WAYBACK_AVAILABLE = "https://archive.org/wayback/available"
+_wayback_ts_cache = {}
 
 
 def _get_session():
@@ -111,10 +114,32 @@ def _direct_get(url, attempts=2):
     return "blocked"
 
 
-def _wayback_get(url):
-    """Fetch the latest archived copy of url; None when never archived."""
+def _wayback_timestamp(url):
+    """Nearest archived snapshot timestamp for url, or None if never archived."""
+    if url in _wayback_ts_cache:
+        return _wayback_ts_cache[url]
     s = _get_session()
-    wb_url = WAYBACK_PREFIX + url
+    ts = None
+    for attempt in range(4):
+        time.sleep(REQUEST_DELAY)
+        try:
+            resp = s.get(WAYBACK_AVAILABLE, params={"url": url}, timeout=45)
+            if resp.status_code == 200:
+                snap = (resp.json().get("archived_snapshots") or {}).get("closest")
+                if snap and snap.get("available"):
+                    ts = snap.get("timestamp")
+                break
+        except Exception as exc:
+            print(f"    availability retry ({exc.__class__.__name__}) {url}",
+                  flush=True)
+        time.sleep(3 * (attempt + 1))
+    _wayback_ts_cache[url] = ts
+    return ts
+
+
+def _fetch_wayback_snapshot(ts, url):
+    s = _get_session()
+    wb_url = f"https://web.archive.org/web/{ts}id_/{url}"
     for attempt in range(6):
         time.sleep(REQUEST_DELAY)
         try:
@@ -132,6 +157,14 @@ def _wayback_get(url):
         print(f"    wayback retry (HTTP {resp.status_code}) {url}", flush=True)
         time.sleep(5 * (attempt + 1))
     raise RuntimeError(f"failed to fetch {url} via wayback")
+
+
+def _wayback_get(url):
+    """Fetch the nearest archived copy of url; None when never archived."""
+    ts = _wayback_timestamp(url)
+    if ts is None:
+        return None
+    return _fetch_wayback_snapshot(ts, url)
 
 
 def http_get(url):
