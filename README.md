@@ -47,7 +47,7 @@ ANTHROPIC_API_KEY=sk-ant-...   # optional server-side fallback
 
 `v1` is the offline-complete release (bank + drills + timed test + coach).
 `v2` adds the bring-your-own-key AI features above. To roll back to v1:
-`git reset --hard b2e318c` (also tagged `v1` locally).
+`git reset --hard v1` (tag `v1` → commit `b760658`).
 
 ### Optional: accounts + progress sync (Supabase)
 
